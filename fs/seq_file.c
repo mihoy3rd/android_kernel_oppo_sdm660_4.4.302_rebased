@@ -27,6 +27,8 @@ static void seq_set_overflow(struct seq_file *m)
 static void *seq_buf_alloc(unsigned long size)
 {
 	void *buf;
+#ifndef VENDOR_EDIT
+/*huacai.zhou@PSW.BSP.Kernel.MM 2018/07/18 optimize for high order allocation*/
 	gfp_t gfp = GFP_KERNEL;
 
 	if (unlikely(size > MAX_RW_COUNT))
@@ -44,6 +46,13 @@ static void *seq_buf_alloc(unsigned long size)
 	if (!buf && size > PAGE_SIZE)
 		buf = vmalloc(size);
 	return buf;
+#else
+	if (size > PAGE_SIZE)
+		buf = vmalloc(size);
+	else
+		buf = kmalloc(size, GFP_KERNEL | __GFP_NOWARN);
+	return buf;
+#endif
 }
 
 /**
@@ -687,7 +696,7 @@ EXPORT_SYMBOL(seq_puts);
  * This routine is very quick when you show lots of numbers.
  * In usual cases, it will be better to use seq_printf(). It's easier to read.
  */
-void seq_put_decimal_ull(struct seq_file *m, char delimiter,
+void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
 			 unsigned long long num)
 {
 	int len;
@@ -695,8 +704,15 @@ void seq_put_decimal_ull(struct seq_file *m, char delimiter,
 	if (m->count + 2 >= m->size) /* we'll write 2 bytes at least */
 		goto overflow;
 
-	if (delimiter)
-		m->buf[m->count++] = delimiter;
+	len = strlen(delimiter);
+	if (m->count + len >= m->size)
+		goto overflow;
+
+	memcpy(m->buf + m->count, delimiter, len);
+	m->count += len;
+
+	if (m->count + 1 >= m->size)
+		goto overflow;
 
 	if (num < 10) {
 		m->buf[m->count++] = num + '0';
@@ -706,6 +722,7 @@ void seq_put_decimal_ull(struct seq_file *m, char delimiter,
 	len = num_to_str(m->buf + m->count, m->size - m->count, num);
 	if (!len)
 		goto overflow;
+
 	m->count += len;
 	return;
 
@@ -714,19 +731,42 @@ overflow:
 }
 EXPORT_SYMBOL(seq_put_decimal_ull);
 
-void seq_put_decimal_ll(struct seq_file *m, char delimiter, long long num)
+void seq_put_decimal_ll(struct seq_file *m, const char *delimiter, long long num)
 {
+	int len;
+
+	if (m->count + 3 >= m->size) /* we'll write 2 bytes at least */
+		goto overflow;
+
+	len = strlen(delimiter);
+	if (m->count + len >= m->size)
+		goto overflow;
+
+	memcpy(m->buf + m->count, delimiter, len);
+	m->count += len;
+
+	if (m->count + 2 >= m->size)
+		goto overflow;
+
 	if (num < 0) {
-		if (m->count + 3 >= m->size) {
-			seq_set_overflow(m);
-			return;
-		}
-		if (delimiter)
-			m->buf[m->count++] = delimiter;
+		m->buf[m->count++] = '-';
 		num = -num;
-		delimiter = '-';
 	}
-	seq_put_decimal_ull(m, delimiter, num);
+
+	if (num < 10) {
+		m->buf[m->count++] = num + '0';
+		return;
+	}
+
+	len = num_to_str(m->buf + m->count, m->size - m->count, num);
+	if (!len)
+		goto overflow;
+
+	m->count += len;
+	return;
+
+overflow:
+	seq_set_overflow(m);
 }
 EXPORT_SYMBOL(seq_put_decimal_ll);
 

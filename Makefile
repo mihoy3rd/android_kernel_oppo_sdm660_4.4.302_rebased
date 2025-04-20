@@ -339,7 +339,7 @@ include scripts/Kbuild.include
 # Make variables (CC, etc...)
 AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
-CC		= $(CROSS_COMPILE)gcc
+REAL_CC		= $(CROSS_COMPILE)gcc
 CPP		= $(CC) -E
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -353,6 +353,10 @@ DEPMOD		= depmod
 PERL		= perl
 PYTHON		= python
 CHECK		= sparse
+
+# Use the wrapper for the compiler.  This wrapper scans for new
+# warnings and causes the build to stop upon encountering them.
+CC		= $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
@@ -391,7 +395,9 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Wno-format-security \
 		   -std=gnu89 $(call cc-option,-fno-PIE)
 
-
+ifeq ($(TARGET_BOARD_TYPE),auto)
+KBUILD_CFLAGS    += -DCONFIG_PLATFORM_AUTO
+endif
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__ $(call cc-option,-fno-PIE)
@@ -399,10 +405,116 @@ KBUILD_AFLAGS_MODULE  := -DMODULE
 KBUILD_CFLAGS_MODULE  := -DMODULE
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
 
+#ifdef VENDOR_EDIT
+#Bin.Yan@Swdp.Android.BuildConfig, 2017/01/07, Add for kernel Build FLAGS
+KBUILD_CFLAGS +=   -DVENDOR_EDIT
+KBUILD_CPPFLAGS += -DVENDOR_EDIT
+CFLAGS_KERNEL +=   -DVENDOR_EDIT
+CFLAGS_MODULE +=   -DVENDOR_EDIT
+#Bin.Li@BSP.Fingerprint.Basic 2018/11/20 enable fastboot for gsi test
+#ifneq ($(filter release cta,$(OPPO_BUILD_TYPE)),)
+#  CFLAGS_KERNEL += -DDISABLE_FASTBOOT_CMDS=1
+#endif
+ifeq ($(OPPO_TARGET_DEVICE),MSM_16051)
+  CFLAGS_KERNEL += -DIS_PROJECT_16051
+endif
+ifeq ($(OPPO_TARGET_DEVICE),MSM_17011)
+  CFLAGS_KERNEL += -DIS_PROJECT_17011
+endif
+ifeq ($(OPPO_TARGET_DEVICE),MSM_16103)
+  CFLAGS_KERNEL += -DIS_PROJECT_16103
+endif
+#LiBin@Prd6.BasicDrv, 2017/03/17, Add for 16353 kernel Build FLAGS
+ifeq ($(OPPO_TARGET_DEVICE),MSM_16353)
+  CFLAGS_KERNEL += -DIS_PROJECT_16353
+endif
+#Zequan.Wang@EXP.System.BuildConfig, 2017/06/12, Add for 17015/17123 kernel Build FLAGS
+ifeq ($(OPPO_TARGET_DEVICE),MSM_17015)
+  CFLAGS_KERNEL += -DIS_PROJECT_17015
+endif
+
+#Hui.Fan@BSP.Kernel.Security, 2017-02-12
+#Obscure the cpu model number in confidential version
+ifeq ($(CONFIDENTIAL_VERSION),1)
+KBUILD_CFLAGS += -DCONFIG_CONFIDENTIAL_VERSION
+endif
+
+ifeq ($(SPECIAL_OPPO_CONFIG),1)
+KBUILD_CFLAGS += -DCONFIG_OPPO_SPECIAL_BUILD
+#Wen.Luo@Bsp.Kernel.Stability, 2018/12/05, Add for aging test, slub debug config
+OPPO_AGINGTEST := true
+endif
+
+ifneq ($(SPECIAL_OPPO_CONFIG),1)
+ifeq ($(filter release,$(OPPO_BUILD_TYPE)),)
+ifeq ($(filter cmcctest cmccfield allnetcttest allnetcmcctest allnetcmccfield,$(NET_BUILD_TYPE)),)
+KBUILD_CFLAGS += -DCONFIG_OPPO_DAILY_BUILD
+endif
+endif
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#YongPeng.Yi@MultiMedia.Display.LCD.Stability, 2017/02/22, add for cmcc test bl level
+ifneq ($(filter cmccfield cmcctest allnetcmcctest allnetcmccfield allnetcttest allnetctfield,$(NET_BUILD_TYPE)),)
+KBUILD_CFLAGS += -DOPPO_CTTEST_FLAG
+endif
+#endif /* VENDOR_EDIT */
+
+ifeq ($(NET_BUILD_TYPE),cmcctest)
+KBUILD_CFLAGS += -DOPPO_CMCC_TEST
+endif
+ifeq ($(NET_BUILD_TYPE),cmccfield)
+KBUILD_CFLAGS += -DOPPO_CMCC_TEST
+endif
+ifeq ($(NET_BUILD_TYPE),cmcc)
+KBUILD_CFLAGS += -DOPPO_CMCC_MP
+endif
+ifeq ($(NET_BUILD_TYPE),cutest)
+KBUILD_CFLAGS += -DOPPO_CU_TEST
+endif
+ifeq ($(NET_BUILD_TYPE),cu)
+KBUILD_CFLAGS += -DOPPO_CU_CLIENT
+endif
+ifeq ($(NET_BUILD_TYPE),cmcctest_dm)
+KBUILD_CFLAGS += -DOPPO_CMCC_TEST
+endif
+ifeq ($(OPPO_BUILD_TYPE),cta)
+KBUILD_CFLAGS += -DOPPO_CTA_FLAG
+KBUILD_CPPFLAGS += -DOPPO_CTA_FLAG
+endif
+ifeq ($(OPPO_TARGET_DEVICE),MSM_14042)
+KBUILD_CFLAGS += -DOPPO_CU_TEST
+endif
+ifneq ($(filter $(OPPO_TARGET_DEVICE),MSM_14037 MSM_14039 MSM_14040 MSM_14065),)
+KBUILD_CFLGAS += -DCONFIG_ENHANCED_LMK
+CFLAGS_KERNEL +=   -DCONFIG_ENHANCED_LMK
+CFLAGS_MODULE +=   -DCONFIG_ENHANCED_LMK
+KBUILD_CPPFLAGS += -DCONFIG_ENHANCED_LMK
+endif
+#endif /*VENDOR_EDIT*/
+#ifdef  VENDOR_EDIT
+#ye.zhang@Sensor.config,2016-09-09, add for CTSI support external storage or not
+$(info @@@@@@@@@@@ 111 OPPO_BUILD_CUSTOMIZE is $(OPPO_BUILD_CUSTOMIZE))
+ifneq ($(OPPO_BUILD_CUSTOMIZE),)
+$(info @@@@@@@@@@@ 222 OPPO_BUILD_CUSTOMIZE is $(OPPO_BUILD_CUSTOMIZE))
+KBUILD_CFLAGS += -DMOUNT_EXSTORAGE_IF
+KBUILD_CPPFLAGS += -DMOUNT_EXSTORAGE_IF
+CFLAGS_KERNEL += -DMOUNT_EXSTORAGE_IF
+CFLAGS_MODULE += -DMOUNT_EXSTORAGE_IF
+endif
+#endif//VENDOR_EDIT
+
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
 KERNELRELEASE = $(shell cat include/config/kernel.release 2> /dev/null)
 KERNELVERSION = $(VERSION)$(if $(PATCHLEVEL),.$(PATCHLEVEL)$(if $(SUBLEVEL),.$(SUBLEVEL)))$(EXTRAVERSION)
 
+#ifdef VENDOR_EDIT
+#Wen.Luo@Bsp.Kernel.Stability, 2018/12/05, Add for aging test, slub debug config
+export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION OPPO_AGINGTEST
+#else
+#export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION
+#endif
 export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION
 export ARCH SRCARCH CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE AS LD CC
 export CPP AR NM STRIP OBJCOPY OBJDUMP
@@ -411,7 +523,7 @@ export HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
 
 export KBUILD_CPPFLAGS NOSTDINC_FLAGS LINUXINCLUDE OBJCOPYFLAGS LDFLAGS
 export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE CFLAGS_GCOV
-export CFLAGS_KASAN CFLAGS_KASAN_NOSANITIZE
+export CFLAGS_KASAN CFLAGS_UBSAN CFLAGS_KASAN_NOSANITIZE
 export CFLAGS_KCOV
 export KBUILD_AFLAGS AFLAGS_KERNEL AFLAGS_MODULE
 export KBUILD_AFLAGS_MODULE KBUILD_CFLAGS_MODULE KBUILD_LDFLAGS_MODULE
@@ -610,7 +722,7 @@ ifneq ($(CROSS_COMPILE),)
 CLANG_TRIPLE    ?= $(CROSS_COMPILE)
 CLANG_TARGET	:= --target=$(notdir $(CLANG_TRIPLE:%-=%))
 GCC_TOOLCHAIN_DIR := $(dir $(shell which $(CROSS_COMPILE)elfedit))
-CLANG_PREFIX	:= --prefix=$(GCC_TOOLCHAIN_DIR)$(notdir $(CROSS_COMPILE))
+CLANG_FLAGS	+= --prefix=$(GCC_TOOLCHAIN_DIR)$(notdir $(CROSS_COMPILE))
 GCC_TOOLCHAIN	:= $(realpath $(GCC_TOOLCHAIN_DIR)/..)
 endif
 ifneq ($(GCC_TOOLCHAIN),)
@@ -853,6 +965,7 @@ KBUILD_ARFLAGS := $(call ar-option,D)
 
 include scripts/Makefile.kasan
 include scripts/Makefile.extrawarn
+include scripts/Makefile.ubsan
 
 # Add any arch overrides and user supplied CPPFLAGS, AFLAGS and CFLAGS as the
 # last assignments
@@ -1673,6 +1786,18 @@ ifneq ($(cmd_files),)
 endif
 
 endif	# skip-makefile
+
+# ifdef VENDOR_EDIT
+# Guoqiang.Jiang@PSW.MM.Display.LCD.Feature, 2018/10/12,
+# add for for mm customize version
+ifneq ($(OPPO_BUILD_CUSTOMIZE),)
+  $(info MM_CUSTOMIZE_TYPE is $(OPPO_BUILD_CUSTOMIZE))
+  KBUILD_CFLAGS += -DMM_CUSTOMIZE_TYPE
+  KBUILD_CPPFLAGS += -DMM_CUSTOMIZE_TYPE
+  CFLAGS_KERNEL += -DMM_CUSTOMIZE_TYPE
+  CFLAGS_MODULE += -DMM_CUSTOMIZE_TYPE
+endif
+# endif /*VENDOR_EDIT*/
 
 PHONY += FORCE
 FORCE:

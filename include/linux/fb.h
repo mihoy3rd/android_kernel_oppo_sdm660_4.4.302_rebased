@@ -163,6 +163,13 @@ struct fb_cursor_user {
 /*      A hardware display blank revert early change occured */
 #define FB_R_EARLY_EVENT_BLANK		0x11
 
+#ifdef VENDOR_EDIT
+/* Shengjun.Gou@PSW.MM.Display.LCD.Stability, 2017/06/13
+ * add for tp fingerprint notify
+*/
+#define MSM_DRM_ONSCREENFINGERPRINT_EVENT 0x20
+#endif /*VENDOR_EDIT*/
+
 struct fb_event {
 	struct fb_info *info;
 	void *data;
@@ -288,9 +295,17 @@ struct fb_ops {
 	int (*fb_ioctl)(struct fb_info *info, unsigned int cmd,
 			unsigned long arg);
 
+	/* perform fb specific ioctl v2 (optional) - provides file param */
+	int (*fb_ioctl_v2)(struct fb_info *info, unsigned int cmd,
+			unsigned long arg, struct file *file);
+
 	/* Handle 32bit compat ioctl (optional) */
 	int (*fb_compat_ioctl)(struct fb_info *info, unsigned cmd,
 			unsigned long arg);
+
+	/* Handle 32bit compat ioctl (optional) */
+	int (*fb_compat_ioctl_v2)(struct fb_info *info, unsigned cmd,
+			unsigned long arg, struct file *file);
 
 	/* perform fb specific mmap */
 	int (*fb_mmap)(struct fb_info *info, struct vm_area_struct *vma);
@@ -460,17 +475,8 @@ struct fb_info {
 	struct fb_cmap cmap;		/* Current cmap */
 	struct list_head modelist;      /* mode list */
 	struct fb_videomode *mode;	/* current mode */
+	struct file *file;		/* current file node */
 
-#ifdef CONFIG_FB_BACKLIGHT
-	/* assigned backlight device */
-	/* set before framebuffer registration, 
-	   remove after unregister */
-	struct backlight_device *bl_dev;
-
-	/* Backlight level curve */
-	struct mutex bl_curve_mutex;	
-	u8 bl_curve[FB_BACKLIGHT_LEVELS];
-#endif
 #ifdef CONFIG_FB_DEFERRED_IO
 	struct delayed_work deferred_work;
 	struct fb_deferred_io *fbdefio;
@@ -635,6 +641,10 @@ extern struct fb_info *registered_fb[FB_MAX];
 extern int num_registered_fb;
 extern struct class *fb_class;
 
+#ifdef VENDOR_EDIT
+//jie.cheng@swdp.shanghai, 2015/11/09, export some symbol
+extern struct fb_info *get_fb_info(unsigned int idx);
+#endif /* VENDOR_EDIT */
 extern int lock_fb_info(struct fb_info *info);
 
 static inline void unlock_fb_info(struct fb_info *info)

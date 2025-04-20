@@ -27,13 +27,96 @@
 #include <linux/mm_inline.h>
 #include <linux/page_ext.h>
 #include <linux/page_owner.h>
-
+#include <asm-generic/uaccess.h>
 #include "internal.h"
 
 #ifdef CONFIG_VM_EVENT_COUNTERS
 DEFINE_PER_CPU(struct vm_event_state, vm_event_states) = {{0}};
 EXPORT_PER_CPU_SYMBOL(vm_event_states);
 
+#ifdef VENDOR_EDIT
+static unsigned int show_order = 0;
+#define SHOW_ALL (11)
+
+static char * const zone_names[MAX_NR_ZONES] = {
+#ifdef CONFIG_ZONE_DMA
+	 "DMA",
+#endif
+#ifdef CONFIG_ZONE_DMA32
+	 "DMA32",
+#endif
+	 "Normal",
+#ifdef CONFIG_HIGHMEM
+	 "HighMem",
+#endif
+	 "Movable",
+#ifdef CONFIG_ZONE_DEVICE
+	 "Device",
+#endif
+};
+
+static int proc_free_area_show(struct seq_file *m, void *p)
+{
+	unsigned int order, t, flc;
+	pg_data_t *pgdat = NODE_DATA(0);
+    struct page *page;
+	int zone_type;		/* needs to be signed */
+
+
+    for (zone_type = 0; zone_type < MAX_NR_ZONES; zone_type++) {
+        struct zone *zone = &pgdat->node_zones[zone_type];
+    
+		if (!populated_zone(zone))
+            continue;
+        
+        seq_printf(m, "---------------------------------------------------------------------------------------------------------------\n");
+        seq_printf(m, "zone_name = %s, show_order = %u\n", zone_names[zone_type], show_order);
+        for (flc = 0; flc < FREE_AREA_COUNTS; flc++)
+            seq_printf(m, "[%d]: label = %lu, segment = %lu\n", flc, zone->zone_label[flc].label, zone->zone_label[flc].segment);
+        seq_printf(m, "\n---------------------------------------------------------------------------------------------------------------\n");
+        for (flc = 0; flc < FREE_AREA_COUNTS; flc++) {
+            seq_printf(m, "flc = %u\n", flc);
+            for_each_migratetype_order(order, t) {
+                if (order == show_order || show_order == SHOW_ALL) {
+                    seq_printf(m, "order = %u, mt = %u\n", order, t);
+                    list_for_each_entry(page, &(zone->free_area[flc][order].free_list[t]), lru) {
+                        seq_printf(m, "%lu\t", page_to_pfn(page));
+                    }
+                    seq_printf(m, "\n");
+                }
+            }
+        }
+    }
+    
+   return 0; 
+}
+
+static ssize_t proc_free_area_write(struct file *file, const char __user *buff, size_t len, loff_t *ppos)
+{
+    char write_data[16] = {0};
+    int ret = 0;
+
+    if (copy_from_user(write_data, buff, len)) {
+        return -EFAULT;
+    }
+    ret = kstrtouint(write_data, 10, &show_order);
+
+    return len;
+}
+
+static int proc_free_area_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, proc_free_area_show, NULL);
+}
+
+static const struct file_operations proc_free_area_fops = {
+    .open       = proc_free_area_open,
+    .read       = seq_read,
+    .llseek     = seq_lseek,
+    .release    = single_release,
+    .write      = proc_free_area_write,
+};
+#endif
 static void sum_vm_events(unsigned long *ret)
 {
 	int cpu;
@@ -638,26 +721,39 @@ static void fill_contig_page_info(struct zone *zone,
 				struct contig_page_info *info)
 {
 	unsigned int order;
+#ifdef VENDOR_EDIT
+    int flc;
+#endif
 
 	info->free_pages = 0;
 	info->free_blocks_total = 0;
 	info->free_blocks_suitable = 0;
 
-	for (order = 0; order < MAX_ORDER; order++) {
-		unsigned long blocks;
+#ifdef VENDOR_EDIT
+    for (flc = 0; flc < FREE_AREA_COUNTS; flc++) {
+#endif
+    for (order = 0; order < MAX_ORDER; order++) {
+        unsigned long blocks;
 
-		/* Count number of free blocks */
-		blocks = zone->free_area[order].nr_free;
-		info->free_blocks_total += blocks;
+        /* Count number of free blocks */
+#ifdef VENDOR_EDIT
+        blocks = zone->free_area[flc][order].nr_free;
+#else
+        blocks = zone->free_area[order].nr_free;
+#endif
+        info->free_blocks_total += blocks;
 
-		/* Count free base pages */
-		info->free_pages += blocks << order;
+        /* Count free base pages */
+        info->free_pages += blocks << order;
 
-		/* Count the suitable free blocks */
-		if (order >= suitable_order)
-			info->free_blocks_suitable += blocks <<
-						(order - suitable_order);
-	}
+        /* Count the suitable free blocks */
+        if (order >= suitable_order)
+            info->free_blocks_suitable += blocks <<
+                        (order - suitable_order);
+    }
+#ifdef VENDOR_EDIT
+    }
+#endif
 }
 
 /*
@@ -750,7 +846,9 @@ const char * const vmstat_text[] = {
 	"nr_dirtied",
 	"nr_written",
 	"nr_pages_scanned",
-
+#if IS_ENABLED(CONFIG_ZSMALLOC)
+	"nr_zspages",
+#endif
 #ifdef CONFIG_NUMA
 	"numa_hit",
 	"numa_miss",
@@ -764,6 +862,19 @@ const char * const vmstat_text[] = {
 	"workingset_nodereclaim",
 	"nr_anon_transparent_hugepages",
 	"nr_free_cma",
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21
+ * Account free pages for MIGRATE_OPPO2
+ */
+	"nr_free_oppo0",
+	"nr_free_oppo2",
+#endif /* VENDOR_EDIT */
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.MM, 2018-09-25, add ion cached account*/
+	"nr_ioncache_pages",
+#endif /*VENDOR_EDIT*/
+	"nr_swapcache",
+	"nr_indirectly_reclaimable",
 
 	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",
@@ -773,6 +884,7 @@ const char * const vmstat_text[] = {
 	/* enum vm_event_item counters */
 	"pgpgin",
 	"pgpgout",
+	"pgpgoutclean",
 	"pswpin",
 	"pswpout",
 
@@ -826,6 +938,7 @@ const char * const vmstat_text[] = {
 	"compact_stall",
 	"compact_fail",
 	"compact_success",
+	"compact_daemon_wake",
 #endif
 
 #ifdef CONFIG_HUGETLB_PAGE
@@ -901,6 +1014,7 @@ static void frag_stop(struct seq_file *m, void *arg)
 
 /* Walk all the zones in a node and print using a callback */
 static void walk_zones_in_node(struct seq_file *m, pg_data_t *pgdat,
+		bool nolock,
 		void (*print)(struct seq_file *m, pg_data_t *, struct zone *))
 {
 	struct zone *zone;
@@ -911,35 +1025,34 @@ static void walk_zones_in_node(struct seq_file *m, pg_data_t *pgdat,
 		if (!populated_zone(zone))
 			continue;
 
-		spin_lock_irqsave(&zone->lock, flags);
+		if (!nolock)
+			spin_lock_irqsave(&zone->lock, flags);
 		print(m, pgdat, zone);
-		spin_unlock_irqrestore(&zone->lock, flags);
+		if (!nolock)
+			spin_unlock_irqrestore(&zone->lock, flags);
 	}
 }
 #endif
 
 #ifdef CONFIG_PROC_FS
-static char * const migratetype_names[MIGRATE_TYPES] = {
-	"Unmovable",
-	"Movable",
-	"Reclaimable",
-	"HighAtomic",
-#ifdef CONFIG_CMA
-	"CMA",
-#endif
-#ifdef CONFIG_MEMORY_ISOLATION
-	"Isolate",
-#endif
-};
-
 static void frag_show_print(struct seq_file *m, pg_data_t *pgdat,
 						struct zone *zone)
 {
 	int order;
+#ifdef VENDOR_EDIT
+    int flc = 0;
+#endif
 
 	seq_printf(m, "Node %d, zone %8s ", pgdat->node_id, zone->name);
+#ifdef VENDOR_EDIT
+    for (flc = 0; flc < FREE_AREA_COUNTS; flc++) {
+	    for (order = 0; order < MAX_ORDER; ++order)
+		    seq_printf(m, "%6lu ", zone->free_area[flc][order].nr_free);
+    }
+#else
 	for (order = 0; order < MAX_ORDER; ++order)
 		seq_printf(m, "%6lu ", zone->free_area[order].nr_free);
+#endif
 	seq_putc(m, '\n');
 }
 
@@ -949,7 +1062,7 @@ static void frag_show_print(struct seq_file *m, pg_data_t *pgdat,
 static int frag_show(struct seq_file *m, void *arg)
 {
 	pg_data_t *pgdat = (pg_data_t *)arg;
-	walk_zones_in_node(m, pgdat, frag_show_print);
+	walk_zones_in_node(m, pgdat, false, frag_show_print);
 	return 0;
 }
 
@@ -958,6 +1071,11 @@ static void pagetypeinfo_showfree_print(struct seq_file *m,
 {
 	int order, mtype;
 
+#ifdef VENDOR_EDIT
+    int flc;
+    
+    for (flc = 0; flc < FREE_AREA_COUNTS; flc++) {
+#endif
 	for (mtype = 0; mtype < MIGRATE_TYPES; mtype++) {
 		seq_printf(m, "Node %4d, zone %8s, type %12s ",
 					pgdat->node_id,
@@ -968,7 +1086,11 @@ static void pagetypeinfo_showfree_print(struct seq_file *m,
 			struct free_area *area;
 			struct list_head *curr;
 
+#ifdef VENDOR_EDIT
+			area = &(zone->free_area[flc][order]);
+#else
 			area = &(zone->free_area[order]);
+#endif
 
 			list_for_each(curr, &area->free_list[mtype])
 				freecount++;
@@ -979,6 +1101,9 @@ static void pagetypeinfo_showfree_print(struct seq_file *m,
 		}
 		seq_putc(m, '\n');
 	}
+#ifdef VENDOR_EDIT
+    }
+#endif
 }
 
 /* Print out the free pages at each order for each migatetype */
@@ -993,7 +1118,7 @@ static int pagetypeinfo_showfree(struct seq_file *m, void *arg)
 		seq_printf(m, "%6d ", order);
 	seq_putc(m, '\n');
 
-	walk_zones_in_node(m, pgdat, pagetypeinfo_showfree_print);
+	walk_zones_in_node(m, pgdat, false, pagetypeinfo_showfree_print);
 
 	return 0;
 }
@@ -1042,7 +1167,7 @@ static int pagetypeinfo_showblockcount(struct seq_file *m, void *arg)
 	for (mtype = 0; mtype < MIGRATE_TYPES; mtype++)
 		seq_printf(m, "%12s ", migratetype_names[mtype]);
 	seq_putc(m, '\n');
-	walk_zones_in_node(m, pgdat, pagetypeinfo_showblockcount_print);
+	walk_zones_in_node(m, pgdat, false, pagetypeinfo_showblockcount_print);
 
 	return 0;
 }
@@ -1086,7 +1211,11 @@ static void pagetypeinfo_showmixedcount_print(struct seq_file *m,
 
 			page = pfn_to_page(pfn);
 			if (PageBuddy(page)) {
-				pfn += (1UL << page_order(page)) - 1;
+				unsigned long freepage_order;
+
+				freepage_order = page_order_unsafe(page);
+				if (freepage_order < MAX_ORDER)
+					pfn += (1UL << freepage_order) - 1;
 				continue;
 			}
 
@@ -1133,7 +1262,7 @@ static void pagetypeinfo_showmixedcount(struct seq_file *m, pg_data_t *pgdat)
 #ifdef CONFIG_PAGE_OWNER
 	int mtype;
 
-	if (!page_owner_inited)
+	if (!static_branch_unlikely(&page_owner_inited))
 		return;
 
 	drain_all_pages(NULL);
@@ -1143,7 +1272,7 @@ static void pagetypeinfo_showmixedcount(struct seq_file *m, pg_data_t *pgdat)
 		seq_printf(m, "%12s ", migratetype_names[mtype]);
 	seq_putc(m, '\n');
 
-	walk_zones_in_node(m, pgdat, pagetypeinfo_showmixedcount_print);
+	walk_zones_in_node(m, pgdat, true, pagetypeinfo_showmixedcount_print);
 #endif /* CONFIG_PAGE_OWNER */
 }
 
@@ -1276,7 +1405,7 @@ static void zoneinfo_show_print(struct seq_file *m, pg_data_t *pgdat,
 static int zoneinfo_show(struct seq_file *m, void *arg)
 {
 	pg_data_t *pgdat = (pg_data_t *)arg;
-	walk_zones_in_node(m, pgdat, zoneinfo_show_print);
+	walk_zones_in_node(m, pgdat, false, zoneinfo_show_print);
 	return 0;
 }
 
@@ -1354,7 +1483,7 @@ static int vmstat_show(struct seq_file *m, void *arg)
 	unsigned long off = l - (unsigned long *)m->private;
 
 	seq_puts(m, vmstat_text[off]);
-	seq_put_decimal_ull(m, ' ', *l);
+	seq_put_decimal_ull(m, " ", *l);
 	seq_putc(m, '\n');
 	return 0;
 }
@@ -1393,7 +1522,7 @@ static cpumask_var_t cpu_stat_off;
 
 static void vmstat_update(struct work_struct *w)
 {
-	if (refresh_cpu_vm_stats(true)) {
+	if (refresh_cpu_vm_stats(true) && !cpu_isolated(smp_processor_id())) {
 		/*
 		 * Counters were updated so we expect more updates
 		 * to occur in the future. Keep on running the
@@ -1410,7 +1539,8 @@ static void vmstat_update(struct work_struct *w)
 	} else {
 		/*
 		 * We did not update any counters so the app may be in
-		 * a mode where it does not cause counter updates.
+		 * a mode where it does not cause counter updates or the cpu
+		 * was isolated.
 		 * We may be uselessly running vmstat_update.
 		 * Defer the checking for differentials to the
 		 * shepherd thread on a different processor.
@@ -1583,6 +1713,9 @@ static struct notifier_block vmstat_notifier =
 
 static int __init setup_vmstat(void)
 {
+#ifdef VENDOR_EDIT
+    struct proc_dir_entry *pentry;
+#endif
 #ifdef CONFIG_SMP
 	cpu_notifier_register_begin();
 	__register_cpu_notifier(&vmstat_notifier);
@@ -1596,6 +1729,14 @@ static int __init setup_vmstat(void)
 	proc_create("vmstat", S_IRUGO, NULL, &proc_vmstat_file_operations);
 	proc_create("zoneinfo", S_IRUGO, NULL, &proc_zoneinfo_file_operations);
 #endif
+#ifdef VENDOR_EDIT
+    pentry = proc_create("free_area_list_show", S_IRWXUGO, NULL, &proc_free_area_fops);
+    if (!pentry) {
+		pr_err("vmstat: failed to create '/proc/free_area_list_show'\n");
+        return -1;
+    }
+#endif 
+
 	return 0;
 }
 module_init(setup_vmstat)
@@ -1660,7 +1801,7 @@ static int unusable_show(struct seq_file *m, void *arg)
 	if (!node_state(pgdat->node_id, N_MEMORY))
 		return 0;
 
-	walk_zones_in_node(m, pgdat, unusable_show_print);
+	walk_zones_in_node(m, pgdat, false, unusable_show_print);
 
 	return 0;
 }
@@ -1712,7 +1853,7 @@ static int extfrag_show(struct seq_file *m, void *arg)
 {
 	pg_data_t *pgdat = (pg_data_t *)arg;
 
-	walk_zones_in_node(m, pgdat, extfrag_show_print);
+	walk_zones_in_node(m, pgdat, false, extfrag_show_print);
 
 	return 0;
 }

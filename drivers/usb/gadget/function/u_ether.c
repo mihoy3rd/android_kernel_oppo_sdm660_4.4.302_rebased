@@ -106,7 +106,7 @@ struct eth_dev {
 static inline int qlen(struct usb_gadget *gadget, unsigned qmult)
 {
 	if (gadget_is_dualspeed(gadget) && (gadget->speed == USB_SPEED_HIGH ||
-					    gadget->speed >= USB_SPEED_SUPER))
+					    gadget->speed == USB_SPEED_SUPER))
 		return qmult * DEFAULT_QLEN;
 	else
 		return DEFAULT_QLEN;
@@ -217,12 +217,11 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 		out = dev->port_usb->out_ep;
 	else
 		out = NULL;
+	spin_unlock_irqrestore(&dev->lock, flags);
 
 	if (!out)
-	{
-		spin_unlock_irqrestore(&dev->lock, flags);
 		return -ENOTCONN;
-	}
+
 
 	/* Padding up to RX_EXTRA handles minor disagreements with host.
 	 * Normally we use the USB "terminate on short read" convention;
@@ -246,7 +245,6 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 
 	if (dev->port_usb->is_fixed)
 		size = max_t(size_t, size, dev->port_usb->fixed_out_len);
-	spin_unlock_irqrestore(&dev->lock, flags);
 
 	DBG(dev, "%s: size: %zd\n", __func__, size);
 	skb = alloc_skb(size + NET_IP_ALIGN, gfp_flags);
@@ -621,9 +619,8 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	}
 	spin_unlock_irqrestore(&dev->lock, flags);
 
-	if (!in) {
-		if (skb)
-			dev_kfree_skb_any(skb);
+	if (skb && !in) {
+		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
 	}
 
@@ -1076,6 +1073,9 @@ int gether_set_dev_addr(struct net_device *net, const char *dev_addr)
 	struct eth_dev *dev;
 	u8 new_addr[ETH_ALEN];
 
+	if (!net)
+		return -ENODEV;
+
 	dev = netdev_priv(net);
 	if (get_ether_addr(dev_addr, new_addr))
 		return -EINVAL;
@@ -1088,6 +1088,9 @@ int gether_get_dev_addr(struct net_device *net, char *dev_addr, int len)
 {
 	struct eth_dev *dev;
 
+	if (!net)
+		return -ENODEV;
+
 	dev = netdev_priv(net);
 	return get_ether_addr_str(dev->dev_mac, dev_addr, len);
 }
@@ -1097,6 +1100,9 @@ int gether_set_host_addr(struct net_device *net, const char *host_addr)
 {
 	struct eth_dev *dev;
 	u8 new_addr[ETH_ALEN];
+
+	if (!net)
+		return -ENODEV;
 
 	dev = netdev_priv(net);
 	if (get_ether_addr(host_addr, new_addr))
@@ -1109,6 +1115,9 @@ EXPORT_SYMBOL_GPL(gether_set_host_addr);
 int gether_get_host_addr(struct net_device *net, char *host_addr, int len)
 {
 	struct eth_dev *dev;
+
+	if (!net)
+		return -ENODEV;
 
 	dev = netdev_priv(net);
 	return get_ether_addr_str(dev->host_mac, host_addr, len);
@@ -1142,6 +1151,9 @@ void gether_set_qmult(struct net_device *net, unsigned qmult)
 {
 	struct eth_dev *dev;
 
+	if (!net)
+		return;
+
 	dev = netdev_priv(net);
 	dev->qmult = qmult;
 }
@@ -1151,6 +1163,9 @@ unsigned gether_get_qmult(struct net_device *net)
 {
 	struct eth_dev *dev;
 
+	if (!net)
+		return -ENODEV;
+
 	dev = netdev_priv(net);
 	return dev->qmult;
 }
@@ -1158,6 +1173,9 @@ EXPORT_SYMBOL_GPL(gether_get_qmult);
 
 int gether_get_ifname(struct net_device *net, char *name, int len)
 {
+	if (!net)
+		return -ENODEV;
+
 	rtnl_lock();
 	strlcpy(name, netdev_name(net), len);
 	rtnl_unlock();

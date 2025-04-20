@@ -347,6 +347,7 @@ int set_selection(const struct tiocl_selection __user *v, struct tty_struct *tty
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(set_selection_kernel);
 
 /* Insert the contents of the selection buffer into the
  * queue of the tty associated with the current console.
@@ -375,7 +376,9 @@ int paste_selection(struct tty_struct *tty)
 	while (sel_buffer && sel_buffer_lth > pasted) {
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (test_bit(TTY_THROTTLED, &tty->flags)) {
+			mutex_unlock(&sel_lock);
 			schedule();
+			mutex_lock(&sel_lock);
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);

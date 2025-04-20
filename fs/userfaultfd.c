@@ -434,6 +434,8 @@ static int userfaultfd_release(struct inode *inode, struct file *file)
 	bool still_valid;
 
 	ACCESS_ONCE(ctx->released) = true;
+	if (!mmget_not_zero(mm))
+		goto wakeup;
 
 	if (!mmget_not_zero(mm))
 		goto wakeup;
@@ -768,6 +770,9 @@ static int userfaultfd_register(struct userfaultfd_ctx *ctx,
 
 	start = uffdio_register.range.start;
 	end = start + uffdio_register.range.len;
+	ret = -ENOMEM;
+	if (!mmget_not_zero(mm))
+		goto out;
 
 	ret = -ENOMEM;
 	if (!mmget_not_zero(mm))
@@ -1316,7 +1321,6 @@ static struct file *userfaultfd_file_create(int flags)
 	ctx->mm = current->mm;
 	/* prevent the mm struct to be freed */
 	atomic_inc(&ctx->mm->mm_count);
-
 	file = anon_inode_getfile("[userfaultfd]", &userfaultfd_fops, ctx,
 				  O_RDWR | (flags & UFFD_SHARED_FCNTL_FLAGS));
 	if (IS_ERR(file)) {

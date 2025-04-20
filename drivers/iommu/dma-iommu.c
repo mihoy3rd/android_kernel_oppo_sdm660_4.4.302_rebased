@@ -221,7 +221,16 @@ static struct page **__iommu_dma_alloc_pages(unsigned int count, gfp_t gfp)
 		 */
 		for (order = min_t(unsigned int, order, __fls(count));
 		     order > 0; order--) {
-			page = alloc_pages(gfp | __GFP_NORETRY, order);
+#ifdef VENDOR_EDIT
+/* Kui.Zhang@PSW.TEC.Kernel.Performance, 2019/02/02, not do reclaim and
+ * page compact on high order (>=4)
+ */
+			page = alloc_pages((order >= 4) ?
+					(gfp | __GFP_NORETRY) &
+					~__GFP_RECLAIM : gfp, order);
+#else
+			page = alloc_pages(gfp | __GFP_NORETRY, order)
+#endif /* VENDOR_EDIT */
 			if (!page)
 				continue;
 			if (PageCompound(page)) {
@@ -515,16 +524,6 @@ void iommu_dma_unmap_sg(struct device *dev, struct scatterlist *sg, int nents,
 	 * contiguous IOVA allocation, so this is incredibly easy.
 	 */
 	__iommu_dma_unmap(iommu_get_domain_for_dev(dev), sg_dma_address(sg));
-}
-
-int iommu_dma_supported(struct device *dev, u64 mask)
-{
-	/*
-	 * 'Special' IOMMUs which don't have the same addressing capability
-	 * as the CPU will have to wait until we have some way to query that
-	 * before they'll be able to use this framework.
-	 */
-	return 1;
 }
 
 int iommu_dma_mapping_error(struct device *dev, dma_addr_t dma_addr)

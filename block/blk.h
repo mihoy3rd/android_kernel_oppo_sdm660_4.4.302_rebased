@@ -112,6 +112,15 @@ void blk_account_io_start(struct request *req, bool new_io);
 void blk_account_io_completion(struct request *req, unsigned int bytes);
 void blk_account_io_done(struct request *req);
 
+#ifdef CONFIG_BLOCK_PERF_FRAMEWORK
+void blk_update_perf_stats(struct bio *bio);
+#else
+static inline void blk_update_perf_stats(struct bio *bio)
+{
+	(void) bio;
+}
+#endif
+
 /*
  * Internal atomic flags for request handling
  */
@@ -140,6 +149,10 @@ static inline void blk_clear_rq_complete(struct request *rq)
 #define ELV_ON_HASH(rq) ((rq)->cmd_flags & REQ_HASHED)
 
 void blk_insert_flush(struct request *rq);
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.Performance, 2018-04-28, add foreground task io opt*/
+extern unsigned int sysctl_fg_io_opt;
+#endif /*VENDOR_EDIT*/
 
 static inline struct request *__elv_next_request(struct request_queue *q)
 {
@@ -148,7 +161,33 @@ static inline struct request *__elv_next_request(struct request_queue *q)
 
 	while (1) {
 		if (!list_empty(&q->queue_head)) {
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.Performance, 2018-04-28, add foreground task io opt*/
+			if ( unlikely(!sysctl_fg_io_opt))
+				rq = list_entry_rq(q->queue_head.next);
+			else {
+#ifdef CONFIG_PM
+				if (!list_empty(&q->fg_head) && q->fg_count > 0 && (q->rpm_status == RPM_ACTIVE)) {
+#else
+				if (!list_empty(&q->fg_head) && q->fg_count > 0) {
+#endif
+					rq = list_entry(q->fg_head.next, struct request, fg_list);
+					q->fg_count--;
+				}
+				else if (q->both_count > 0) {
+						rq = list_entry_rq(q->queue_head.next);
+						q->both_count--;
+				}
+				else {
+					q->fg_count = q->fg_count_max;
+					q->both_count = q->both_count_max;
+					rq = list_entry_rq(q->queue_head.next);
+				}
+			}
+#else
+
 			rq = list_entry_rq(q->queue_head.next);
+#endif /*VENDOR_EDIT*/
 			return rq;
 		}
 
@@ -214,7 +253,6 @@ int attempt_back_merge(struct request_queue *q, struct request *rq);
 int attempt_front_merge(struct request_queue *q, struct request *rq);
 int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
 				struct request *next);
-void blk_recalc_rq_segments(struct request *rq);
 void blk_rq_set_mixed_merge(struct request *rq);
 bool blk_rq_merge_ok(struct request *rq, struct bio *bio);
 int blk_try_merge(struct request *rq, struct bio *bio);

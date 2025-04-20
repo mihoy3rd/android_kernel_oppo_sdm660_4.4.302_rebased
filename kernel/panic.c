@@ -24,6 +24,10 @@
 #include <linux/init.h>
 #include <linux/nmi.h>
 #include <linux/console.h>
+#include <soc/qcom/minidump.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/exception.h>
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
@@ -61,6 +65,29 @@ void __weak panic_smp_self_stop(void)
 		cpu_relax();
 }
 
+#ifdef VENDOR_EDIT //yixue.ge@bsp.drv add for dump cpu contex for minidump
+#ifdef CONFIG_QCOM_COMMON_LOG
+static int in_panic = 0;
+int panic_count(void)
+{
+	return in_panic;
+}
+EXPORT_SYMBOL(panic_count);
+extern void dumpcpuregs(struct pt_regs *pt_regs);
+#else
+void dumpcpuregs(struct pt_regs *pt_regs){}
+#endif /*CONFIG_QCOM_COMMON_LOG*/
+#endif /*VENDOR_EDIT*/
+
+#ifdef VENDOR_EDIT
+/*yanwu@TECH.Storage.FS, 2019-08-27, flush device cache before goto dump mode*/
+extern int panic_flush_device_cache(int timeout);
+#endif  /*VENDOR_EDIT*/
+#ifdef VENDOR_EDIT
+/*yanghao@BSP.Kernel.Stability, 2019-9-5*/
+extern int get_download_mode(void);
+#endif  /*VENDOR_EDIT*/
+
 /**
  *	panic - halt the system
  *	@fmt: The text string to print
@@ -76,6 +103,15 @@ void panic(const char *fmt, ...)
 	va_list args;
 	long i, i_next = 0;
 	int state = 0;
+
+#ifdef VENDOR_EDIT //yixue.ge@bsp.drv add for dump cpu contex for minidump
+#ifdef CONFIG_QCOM_COMMON_LOG
+	in_panic++;
+	dumpcpuregs(NULL);
+
+#endif /*CONFIG_QCOM_COMMON_LOG*/
+#endif /*VENDOR_EDIT*/
+	trace_kernel_panic(0);
 
 	/*
 	 * Disable local interrupts. This will prevent panic_smp_self_stop
@@ -104,6 +140,13 @@ void panic(const char *fmt, ...)
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
+	dump_stack_minidump(0);
+#ifdef VENDOR_EDIT
+	/*yanwu@TECH.Storage.FS, 2019-08-27, flush device cache before goto dump mode*/
+	/*yanghao@BSP.Kernel.Stability, 2019-9-5*/
+	if(!get_download_mode())
+	    panic_flush_device_cache(2000);
+#endif
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
@@ -179,6 +222,9 @@ void panic(const char *fmt, ...)
 			mdelay(PANIC_TIMER_STEP);
 		}
 	}
+
+	trace_kernel_panic_late(0);
+
 	if (panic_timeout != 0) {
 		/*
 		 * This will not be a clean reboot, with everything

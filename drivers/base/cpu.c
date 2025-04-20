@@ -180,9 +180,207 @@ static struct attribute_group crash_note_cpu_attr_group = {
 };
 #endif
 
+#ifdef CONFIG_HOTPLUG_CPU
+
+static ssize_t isolate_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	ssize_t rc;
+	int cpuid = cpu->dev.id;
+	unsigned int isolated = cpu_isolated(cpuid);
+
+	rc = snprintf(buf, PAGE_SIZE-2, "%d\n", isolated);
+
+	return rc;
+}
+
+#ifdef VENDOR_EDIT
+/* Hui.Fan@SWDP.BSP.OPPOFeature.Hypnus, 2017-03-13
+ * Provide interface to isolate/unisolate cpu after stop core_ctl
+ */
+static ssize_t __ref isolate_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	int err;
+	int cpuid = cpu->dev.id;
+	unsigned int isolated;
+
+	err = kstrtouint(strstrip((char *)buf), 0, &isolated);
+	if (err)
+		return err;
+
+	if (isolated > 1)
+		return -EINVAL;
+
+	if (isolated)
+		sched_isolate_cpu(cpuid);
+	else
+		sched_unisolate_cpu(cpuid);
+
+	return count;
+}
+
+static DEVICE_ATTR(isolate, 0644, isolate_show, isolate_store);
+#else
+static DEVICE_ATTR_RO(isolate);
+#endif /* VENDOR_EDIT */
+
+static struct attribute *cpu_isolated_attrs[] = {
+	&dev_attr_isolate.attr,
+	NULL
+};
+
+static struct attribute_group cpu_isolated_attr_group = {
+	.attrs = cpu_isolated_attrs,
+};
+
+#endif
+
+#ifdef CONFIG_SCHED_HMP
+
+static ssize_t show_sched_static_cpu_pwr_cost(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	ssize_t rc;
+	int cpuid = cpu->dev.id;
+	unsigned int pwr_cost;
+
+	pwr_cost = sched_get_static_cpu_pwr_cost(cpuid);
+
+	rc = snprintf(buf, PAGE_SIZE-2, "%d\n", pwr_cost);
+
+	return rc;
+}
+
+static ssize_t __ref store_sched_static_cpu_pwr_cost(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	int err;
+	int cpuid = cpu->dev.id;
+	unsigned int pwr_cost;
+
+	err = kstrtouint(strstrip((char *)buf), 0, &pwr_cost);
+	if (err)
+		return err;
+
+	err = sched_set_static_cpu_pwr_cost(cpuid, pwr_cost);
+
+	if (err >= 0)
+		err = count;
+
+	return err;
+}
+
+static ssize_t show_sched_static_cluster_pwr_cost(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	ssize_t rc;
+	int cpuid = cpu->dev.id;
+	unsigned int pwr_cost;
+
+	pwr_cost = sched_get_static_cluster_pwr_cost(cpuid);
+
+	rc = snprintf(buf, PAGE_SIZE-2, "%d\n", pwr_cost);
+
+	return rc;
+}
+
+static ssize_t __ref store_sched_static_cluster_pwr_cost(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	int err;
+	int cpuid = cpu->dev.id;
+	unsigned int pwr_cost;
+
+	err = kstrtouint(strstrip((char *)buf), 0, &pwr_cost);
+	if (err)
+		return err;
+
+	err = sched_set_static_cluster_pwr_cost(cpuid, pwr_cost);
+
+	if (err >= 0)
+		err = count;
+
+	return err;
+}
+
+static ssize_t show_sched_cluser_wake_idle(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	ssize_t rc;
+	int cpuid = cpu->dev.id;
+	unsigned int wake_up_idle;
+
+	wake_up_idle = sched_get_cluster_wake_idle(cpuid);
+
+	rc = scnprintf(buf, PAGE_SIZE-2, "%d\n", wake_up_idle);
+
+	return rc;
+}
+
+static ssize_t __ref store_sched_cluster_wake_idle(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct cpu *cpu = container_of(dev, struct cpu, dev);
+	int err;
+	int cpuid = cpu->dev.id;
+	unsigned int wake_up_idle;
+
+	err = kstrtouint(strstrip((char *)buf), 0, &wake_up_idle);
+	if (err)
+		return err;
+
+	err = sched_set_cluster_wake_idle(cpuid, wake_up_idle);
+
+	if (err >= 0)
+		err = count;
+
+	return err;
+}
+
+static DEVICE_ATTR(sched_static_cpu_pwr_cost, 0644,
+					show_sched_static_cpu_pwr_cost,
+					store_sched_static_cpu_pwr_cost);
+static DEVICE_ATTR(sched_static_cluster_pwr_cost, 0644,
+					show_sched_static_cluster_pwr_cost,
+					store_sched_static_cluster_pwr_cost);
+static DEVICE_ATTR(sched_cluster_wake_up_idle, 0644,
+					show_sched_cluser_wake_idle,
+					store_sched_cluster_wake_idle);
+
+static struct attribute *hmp_sched_cpu_attrs[] = {
+	&dev_attr_sched_static_cpu_pwr_cost.attr,
+	&dev_attr_sched_static_cluster_pwr_cost.attr,
+	&dev_attr_sched_cluster_wake_up_idle.attr,
+	NULL
+};
+
+static struct attribute_group sched_hmp_cpu_attr_group = {
+	.attrs = hmp_sched_cpu_attrs,
+};
+
+#endif /* CONFIG_SCHED_HMP */
+
 static const struct attribute_group *common_cpu_attr_groups[] = {
 #ifdef CONFIG_KEXEC
 	&crash_note_cpu_attr_group,
+#endif
+#ifdef CONFIG_SCHED_HMP
+	&sched_hmp_cpu_attr_group,
+#endif
+#ifdef CONFIG_HOTPLUG_CPU
+	&cpu_isolated_attr_group,
 #endif
 	NULL
 };
@@ -190,6 +388,12 @@ static const struct attribute_group *common_cpu_attr_groups[] = {
 static const struct attribute_group *hotplugable_cpu_attr_groups[] = {
 #ifdef CONFIG_KEXEC
 	&crash_note_cpu_attr_group,
+#endif
+#ifdef CONFIG_SCHED_HMP
+	&sched_hmp_cpu_attr_group,
+#endif
+#ifdef CONFIG_HOTPLUG_CPU
+	&cpu_isolated_attr_group,
 #endif
 	NULL
 };
@@ -220,6 +424,7 @@ static struct cpu_attr cpu_attrs[] = {
 	_CPU_ATTR(online, &cpu_online_mask),
 	_CPU_ATTR(possible, &cpu_possible_mask),
 	_CPU_ATTR(present, &cpu_present_mask),
+	_CPU_ATTR(core_ctl_isolated, &cpu_isolated_mask),
 };
 
 /*
@@ -270,12 +475,32 @@ static ssize_t print_cpus_isolated(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
 	int n = 0, len = PAGE_SIZE-2;
-
+#ifdef VENDOR_EDIT
+/* Hui.Fan@SWDP.BSP.OPPOFeature.Hypnus, 2017-03-13, fix print error */
+	n = scnprintf(buf, len, "%*pbl\n", cpumask_pr_args(cpu_isolated_mask));
+#else
 	n = scnprintf(buf, len, "%*pbl\n", cpumask_pr_args(cpu_isolated_map));
+#endif /* VENDOR_EDIT */
 
 	return n;
 }
 static DEVICE_ATTR(isolated, 0444, print_cpus_isolated, NULL);
+
+#ifdef VENDOR_EDIT
+/* Hui.Fan@SWDP.BSP.OPPOFeature.Hypnus, 2017-03-11, print available cpus */
+static ssize_t print_cpus_available(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	int n = 0, len = PAGE_SIZE-2;
+	struct cpumask avail_mask;
+
+	cpumask_andnot(&avail_mask, cpu_online_mask, cpu_isolated_mask);
+	n = scnprintf(buf, len, "%*pbl\n", cpumask_pr_args(&avail_mask));
+
+	return n;
+}
+static DEVICE_ATTR(avail, 0444, print_cpus_available, NULL);
+#endif /* VENDOR_EDIT */
 
 #ifdef CONFIG_NO_HZ_FULL
 static ssize_t print_cpus_nohz_full(struct device *dev,
@@ -454,9 +679,14 @@ static struct attribute *cpu_root_attrs[] = {
 	&cpu_attrs[0].attr.attr,
 	&cpu_attrs[1].attr.attr,
 	&cpu_attrs[2].attr.attr,
+	&cpu_attrs[3].attr.attr,
 	&dev_attr_kernel_max.attr,
 	&dev_attr_offline.attr,
 	&dev_attr_isolated.attr,
+#ifdef VENDOR_EDIT
+/* Hui.Fan@SWDP.BSP.OPPOFeature.Hypnus, 2017-03-11, print available cpus */
+	&dev_attr_avail.attr,
+#endif
 #ifdef CONFIG_NO_HZ_FULL
 	&dev_attr_nohz_full.attr,
 #endif

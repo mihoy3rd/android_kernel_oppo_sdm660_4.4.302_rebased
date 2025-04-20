@@ -36,6 +36,10 @@
 #ifdef __KERNEL__
 #include <linux/compat.h>
 #endif
+#if defined(VENDOR_EDIT) && defined(CONFIG_EXT4_ASYNC_DISCARD_SUPPORT)
+//yh@PSW.BSP.Storage.EXT4, 2018-11-26 add for ext4 async discard suppot
+#include "discard.h"
+#endif
 
 /*
  * The fourth extended filesystem constants/structures
@@ -591,6 +595,7 @@ enum {
 #define EXT4_ENCRYPTION_MODE_AES_256_CTS	4
 #define EXT4_ENCRYPTION_MODE_SPECK128_256_XTS	7
 #define EXT4_ENCRYPTION_MODE_SPECK128_256_CTS	8
+#define EXT4_ENCRYPTION_MODE_PRIVATE		127
 #define EXT4_ENCRYPTION_MODE_AES_256_HEH	126
 
 #include "ext4_crypto.h"
@@ -1077,6 +1082,10 @@ struct ext4_inode_info {
 #define EXT4_MOUNT_DIOREAD_NOLOCK	0x400000 /* Enable support for dio read nolocking */
 #define EXT4_MOUNT_JOURNAL_CHECKSUM	0x800000 /* Journal checksums */
 #define EXT4_MOUNT_JOURNAL_ASYNC_COMMIT	0x1000000 /* Journal Async Commit */
+#if defined(VENDOR_EDIT) && defined(CONFIG_EXT4_ASYNC_DISCARD_SUPPORT)
+//yh@PSW.BSP.Storage.EXT4, 2018-11-26 add for ext4 async discard suppot
+#define EXT4_MOUNT_ASYNC_DISCARD	0x2000000 /* Async issue discard request */
+#endif
 #define EXT4_MOUNT_DELALLOC		0x8000000 /* Delalloc support */
 #define EXT4_MOUNT_DATA_ERR_ABORT	0x10000000 /* Abort on file data write */
 #define EXT4_MOUNT_BLOCK_VALIDITY	0x20000000 /* Block validity checking */
@@ -1285,6 +1294,38 @@ struct ext4_super_block {
 
 /* Number of quota types we support */
 #define EXT4_MAXQUOTAS 2
+#if defined(VENDOR_EDIT) && defined(CONFIG_EXT4_ASYNC_DISCARD_SUPPORT)
+//yh@PSW.BSP.Storage.EXT4, 2018-11-26 add for ext4 async discard suppot
+struct discard_policy {
+	int type;			/* type of discard */
+	unsigned int min_interval;	/* used for candidates exist */
+	unsigned int mid_interval;	/* used for device busy */
+	unsigned int max_interval;	/* used for candidates not exist */
+	unsigned int max_requests;	/* # of discards issued per round */
+	unsigned int io_aware_gran;	/* minimum granularity discard not be aware of I/O */
+	unsigned int granularity;	/* discard granularity */
+	bool io_aware;				/* issue discard in idle time */
+	bool sync;					/* submit discard with REQ_SYNC flag */
+};
+
+struct discard_cmd_control {
+	struct task_struct *ext4_issue_discard_thread;	/* discard thread */
+	wait_queue_head_t discard_wait_queue;	/* waiting queue for wake-up */
+	unsigned int discard_wake;				/* to wake up discard thread */
+	struct mutex cmd_lock;
+	unsigned long long max_discards;		/* max. discards to be issued */
+	unsigned int discard_granularity;		/* discard granularity */
+	unsigned int dpolicy_param_tune;		/* tune dpolicy param*/
+	unsigned long long issued_discard;		/* # of issued discard */
+	ext4_group_t group_start;				/*current trim point, start group num*/
+	ext4_grpblk_t blk_offset;				/*current trim point, group internal block offset*/
+	unsigned long long cnt_io_interrupted;	/* # of interrupted by IO */
+	unsigned int total_trimed_groups;		/* # of total trimed groups */
+	void * groups_block_bitmap;				/* backup trimmed groups block bitmap */
+	struct discard_policy dpolicy;			/* discard policy */
+	bool io_interrupted;					/*if the discard thread interrupted by IO*/
+};
+#endif
 
 /*
  * fourth extended-fs super-block data in memory
@@ -1451,6 +1492,12 @@ struct ext4_sb_info {
 	struct ratelimit_state s_err_ratelimit_state;
 	struct ratelimit_state s_warning_ratelimit_state;
 	struct ratelimit_state s_msg_ratelimit_state;
+#if defined(VENDOR_EDIT) && defined(CONFIG_EXT4_ASYNC_DISCARD_SUPPORT)
+//yh@PSW.BSP.Storage.EXT4, 2018-11-26 add for ext4 async discard suppot
+	struct discard_cmd_control *dcc_info;
+	unsigned long last_time;	/* to store time in jiffies */
+	long interval_time;		/* to store thresholds */
+#endif
 };
 
 static inline struct ext4_sb_info *EXT4_SB(struct super_block *sb)
@@ -2284,7 +2331,8 @@ struct page *ext4_encrypt(struct inode *inode,
 			  struct page *plaintext_page,
 			  gfp_t gfp_flags);
 int ext4_decrypt(struct page *page);
-int ext4_encrypted_zeroout(struct inode *inode, struct ext4_extent *ex);
+int ext4_encrypted_zeroout(struct inode *inode, ext4_lblk_t lblk,
+			   ext4_fsblk_t pblk, ext4_lblk_t len);
 extern const struct dentry_operations ext4_encrypted_d_ops;
 
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
@@ -2347,15 +2395,35 @@ static inline void ext4_fname_free_filename(struct ext4_filename *fname) { }
 /* crypto_key.c */
 void ext4_free_crypt_info(struct ext4_crypt_info *ci);
 void ext4_free_encryption_info(struct inode *inode, struct ext4_crypt_info *ci);
+int _ext4_get_encryption_info(struct inode *inode);
 
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
 int ext4_has_encryption_key(struct inode *inode);
 
-int ext4_get_encryption_info(struct inode *inode);
+static inline int ext4_get_encryption_info(struct inode *inode)
+{
+	struct ext4_crypt_info *ci = EXT4_I(inode)->i_crypt_info;
+
+	if (!ci ||
+	    (ci->ci_keyring_key &&
+	     (ci->ci_keyring_key->flags & ((1 << KEY_FLAG_INVALIDATED) |
+					   (1 << KEY_FLAG_REVOKED) |
+					   (1 << KEY_FLAG_DEAD)))))
+		return _ext4_get_encryption_info(inode);
+	return 0;
+}
 
 static inline struct ext4_crypt_info *ext4_encryption_info(struct inode *inode)
 {
 	return EXT4_I(inode)->i_crypt_info;
+}
+
+static inline int ext4_using_hardware_encryption(struct inode *inode)
+{
+	struct ext4_crypt_info *ci = ext4_encryption_info(inode);
+
+	return S_ISREG(inode->i_mode) && ci &&
+		ci->ci_data_mode == EXT4_ENCRYPTION_MODE_PRIVATE;
 }
 
 #else
@@ -2370,6 +2438,10 @@ static inline int ext4_get_encryption_info(struct inode *inode)
 static inline struct ext4_crypt_info *ext4_encryption_info(struct inode *inode)
 {
 	return NULL;
+}
+static inline int ext4_using_hardware_encryption(struct inode *inode)
+{
+	return 0;
 }
 #endif
 
@@ -2542,6 +2614,8 @@ extern int ext4_filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
 extern qsize_t *ext4_get_reserved_space(struct inode *inode);
 extern void ext4_da_update_reserve_space(struct inode *inode,
 					int used, int quota_claim);
+extern int ext4_issue_zeroout(struct inode *inode, ext4_lblk_t lblk,
+			      ext4_fsblk_t pblk, ext4_lblk_t len);
 
 /* indirect.c */
 extern int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
@@ -2988,6 +3062,49 @@ static inline void ext4_unlock_group(struct super_block *sb,
 	spin_unlock(ext4_group_lock_ptr(sb, group));
 }
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_EXT4_ASYNC_DISCARD_SUPPORT)
+//yh@PSW.BSP.Storage.EXT4, 2018-11-26 add for ext4 async discard suppot
+static inline int ext4_utilization(struct ext4_sb_info *sbi)
+{
+	return div_u64((u64)ext4_free_blocks_count(sbi->s_es) * 100,
+					ext4_blocks_count(sbi->s_es));
+}
+
+static inline bool ext4_readonly(struct super_block *sb)
+{
+	return sb->s_flags & MS_RDONLY;
+}
+
+static inline void ext4_update_time(struct ext4_sb_info *sbi)
+{
+	sbi->last_time = jiffies;
+}
+
+static inline bool ext4_time_over(struct ext4_sb_info *sbi)
+{
+	struct timespec ts = {sbi->interval_time, 0};
+	unsigned long interval = timespec_to_jiffies(&ts);
+
+	return time_after(jiffies, sbi->last_time + interval);
+}
+
+static inline bool is_ext4_idle(struct ext4_sb_info *sbi)
+{
+	struct block_device *bdev = sbi->s_sb->s_bdev;
+	struct request_queue *q = bdev_get_queue(bdev);
+	struct request_list *rl = &q->root_rl;
+
+	if (rl->count[BLK_RW_SYNC] || rl->count[BLK_RW_ASYNC])
+		return 0;
+
+	return ext4_time_over(sbi);
+}
+
+extern int ext4_trim_groups(struct super_block *sb,  struct discard_cmd_control *dcc,
+			unsigned long blkdev_flags);
+extern int create_discard_cmd_control(struct ext4_sb_info *sbi);
+extern void destroy_discard_cmd_control(struct ext4_sb_info *sbi);
+#endif
 /*
  * Block validity checking
  */
@@ -3045,8 +3162,7 @@ extern int ext4_da_write_inline_data_end(struct inode *inode, loff_t pos,
 					 struct page *page);
 extern int ext4_try_add_inline_entry(handle_t *handle,
 				     struct ext4_filename *fname,
-				     struct dentry *dentry,
-				     struct inode *inode);
+				     struct inode *dir, struct inode *inode);
 extern int ext4_try_create_inline_dir(handle_t *handle,
 				      struct inode *parent,
 				      struct inode *inode);

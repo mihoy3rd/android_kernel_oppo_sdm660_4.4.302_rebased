@@ -450,6 +450,18 @@ config CHARGER_SMB347
 	  Say Y to include support for Summit Microelectronics SMB347
 	  Battery Charger.
 
+config BATTERY_BQ28400
+	tristate "BQ28400 battery driver"
+	depends on I2C
+	default n
+	help
+	  Say Y here to enable support for batteries with BQ28400 (I2C) chips.
+	  The bq28400 Texas Instruments Inc device monitors the battery
+	  charging/discharging status via Rsens resistor, typically 10 mohm.
+	  It monitors the battery temperature via Thermistor.
+	  The device monitors the battery level (Relative-State-Of-Charge).
+	  The device is SBS compliant, providing battery info over I2C.
+
 config CHARGER_TPS65090
 	tristate "TPS65090 battery charger driver"
 	depends on MFD_TPS65090
@@ -509,8 +521,52 @@ config AXP20X_POWER
 	  This driver provides support for the power supply features of
 	  AXP20x PMIC.
 
+#ifdef VENDOR_EDIT /* Jianchao.Shi@BSP.CHG.Basic, 2016/12/20, sjc Delete for charging */
+config OPPO_MSM8998P_CHARGER
+	tristate "OPPO MSM8998P charger driver"
+	depends on MFD_SPMI_PMIC
+	help
+	  Enables support for the oppo charging framework
+
+config OPPO_SHORT_C_BATT_CHECK
+	tristate "OPPO_SHORT_C_BATT CHECK SUPPORT"
+	default n
+	depends on MFD_SPMI_PMIC
+	help
+	  Say Y to include support
+
+config OPPO_RTC_DET_SUPPORT
+	tristate "OPPO RTC DET SUPPORT"
+	default n
+	depends on MFD_SPMI_PMIC
+	help
+	  Say Y to include support
+
+config OPPO_CHECK_CHARGERID_VOLT
+	tristate "OPPO CHECK CHARGERID VOLT"
+	default n
+	depends on MFD_SPMI_PMIC
+	help
+	  Say Y to include support
+
+config OPPO_SHIP_MODE_SUPPORT
+	tristate "OPPO_SHIP_MODE_SUPPORT"
+	default n
+	depends on MFD_SPMI_PMIC
+	help
+	  Say Y to include support
+	  
+config OPPO_SHORT_HW_CHECK
+	bool "OPPO batt HW SHORT "
+	help
+	  Say Y here to declare charging system is on MTK	  
+source "drivers/power/oppo/Kconfig"
+#endif
+
 source "drivers/power/reset/Kconfig"
+source "drivers/power/supply/Kconfig"
 
 endif # POWER_SUPPLY
 
 source "drivers/power/avs/Kconfig"
+source "drivers/power/qcom/Kconfig"

@@ -48,7 +48,7 @@ static char buildvariant[BUILD_VARIANT];
 
 static bool target_added;
 static bool verity_enabled = true;
-struct dentry *debug_dir;
+static struct dentry *debug_dir;
 static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv);
 
 static struct target_type android_verity_target = {
@@ -114,6 +114,16 @@ static inline bool is_userdebug(void)
 
 	return !strncmp(buildvariant, typeuserdebug, sizeof(typeuserdebug));
 }
+
+//#ifdef VENDOR_EDIT
+//Xuefeng.Peng@PSW.AD.Usb.Adb.1054277, 2018/09/28, Add for user version do not enable dm-verity
+static inline bool is_user(void)
+{
+	static const char typeuser[]  = "user";
+
+	return !strncmp(buildvariant, typeuser, sizeof(typeuser));
+}
+//#endif/*VENDOR_EDIT*/
 
 static inline bool is_unlocked(void)
 {
@@ -371,8 +381,21 @@ static int verify_header(struct android_metadata_header *header)
 {
 	int retval = -EINVAL;
 
-	if (is_userdebug() && le32_to_cpu(header->magic_number) ==
+	//#ifdef VENDOR_EDIT
+	//Xuefeng.Peng@PSW.AD.Usb.Adb.1054277, 2018/09/28, Add for user version do not enable dm-verity
+	//if (is_userdebug() && le32_to_cpu(header->magic_number) ==
+			//VERITY_METADATA_MAGIC_DISABLE)
+	//#else
+	//#ifdef VENDOR_EDIT
+	//Bin.Li@BSP.Fingerprint.Basic, 2018/11/21, Added for disable verify when the device is unlocked
+	if (is_unlocked()) {
+		DMWARN("disable verity when unlocked");
+		return VERITY_STATE_DISABLE;
+	}
+	//#endif/*VENDOR_EDIT*/
+	if ((is_user() || is_userdebug()) && le32_to_cpu(header->magic_number) ==
 			VERITY_METADATA_MAGIC_DISABLE)
+	//#endif/*VENDOR_EDIT*/
 		return VERITY_STATE_DISABLE;
 
 	if (!(le32_to_cpu(header->magic_number) ==
@@ -538,7 +561,7 @@ blkdev_release:
 }
 
 /* helper functions to extract properties from dts */
-const char *find_dt_value(const char *name)
+static const char *find_dt_value(const char *name)
 {
 	struct device_node *firmware;
 	const char *value;
@@ -693,7 +716,7 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	dev_t uninitialized_var(dev);
 	struct android_metadata *metadata = NULL;
 	int err = 0, i, mode;
-	char *key_id, *table_ptr, dummy, *target_device,
+	char *key_id = NULL, *table_ptr, dummy, *target_device,
 	*verity_table_args[VERITY_TABLE_ARGS + 2 + VERITY_TABLE_OPT_FEC_ARGS];
 	/* One for specifying number of opt args and one for mode */
 	sector_t data_sectors;

@@ -75,7 +75,7 @@ queue_requests_store(struct request_queue *q, const char *page, size_t count)
 
 static ssize_t queue_ra_show(struct request_queue *q, char *page)
 {
-	unsigned long ra_kb = q->backing_dev_info.ra_pages <<
+	unsigned long ra_kb = q->backing_dev_info->ra_pages <<
 					(PAGE_CACHE_SHIFT - 10);
 
 	return queue_var_show(ra_kb, (page));
@@ -90,11 +90,53 @@ queue_ra_store(struct request_queue *q, const char *page, size_t count)
 	if (ret < 0)
 		return ret;
 
-	q->backing_dev_info.ra_pages = ra_kb >> (PAGE_CACHE_SHIFT - 10);
+	q->backing_dev_info->ra_pages = ra_kb >> (PAGE_CACHE_SHIFT - 10);
 
 	return ret;
 }
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.Performance, 2018-04-28, add foreground task io opt*/
+static ssize_t queue_fgio_show(struct request_queue *q, char *page)
+{
+	int cnt = q->fg_count_max;
 
+	return queue_var_show(cnt, (page));
+}
+
+static ssize_t
+queue_fgio_store(struct request_queue *q, const char *page, size_t count)
+{
+	unsigned long cnt;
+	ssize_t ret = queue_var_store(&cnt, page, count);
+
+	if (ret < 0)
+		return ret;
+
+	q->fg_count_max= cnt;
+
+	return ret;
+}
+static ssize_t queue_bothio_show(struct request_queue *q, char *page)
+{
+	int cnt = q->both_count_max;
+
+	return queue_var_show(cnt, (page));
+}
+
+static ssize_t
+queue_bothio_store(struct request_queue *q, const char *page, size_t count)
+{
+	unsigned long cnt;
+	ssize_t ret = queue_var_store(&cnt, page, count);
+
+	if (ret < 0)
+		return ret;
+
+	q->both_count_max= cnt;
+
+	return ret;
+}
+#endif /*VENDOR_EDIT*/
 static ssize_t queue_max_sectors_show(struct request_queue *q, char *page)
 {
 	int max_sectors_kb = queue_max_sectors(q) >> 1;
@@ -359,7 +401,19 @@ static struct queue_sysfs_entry queue_ra_entry = {
 	.show = queue_ra_show,
 	.store = queue_ra_store,
 };
-
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.Performance, 2018-04-28, add foreground task io opt*/
+static struct queue_sysfs_entry queue_fgio_entry = {
+	.attr = {.name = "fg_io_cnt_max", .mode = S_IRUGO | S_IWUSR },
+	.show = queue_fgio_show,
+	.store = queue_fgio_store,
+};
+static struct queue_sysfs_entry queue_bothio_entry = {
+	.attr = {.name = "both_io_cnt_max", .mode = S_IRUGO | S_IWUSR },
+	.show = queue_bothio_show,
+	.store = queue_bothio_store,
+};
+#endif /*VENDOR_EDIT*/
 static struct queue_sysfs_entry queue_max_sectors_entry = {
 	.attr = {.name = "max_sectors_kb", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_max_sectors_show,
@@ -482,6 +536,11 @@ static struct queue_sysfs_entry queue_poll_entry = {
 static struct attribute *default_attrs[] = {
 	&queue_requests_entry.attr,
 	&queue_ra_entry.attr,
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.Performance, 2018-04-28, add foreground task io opt*/
+	&queue_fgio_entry.attr,
+	&queue_bothio_entry.attr,
+#endif /*VENDOR_EDIT*/
 	&queue_max_hw_sectors_entry.attr,
 	&queue_max_sectors_entry.attr,
 	&queue_max_segments_entry.attr,
@@ -578,7 +637,7 @@ static void blk_release_queue(struct kobject *kobj)
 	struct request_queue *q =
 		container_of(kobj, struct request_queue, kobj);
 
-	bdi_exit(&q->backing_dev_info);
+	bdi_put(q->backing_dev_info);
 	blkcg_exit_queue(q);
 
 	if (q->elevator) {

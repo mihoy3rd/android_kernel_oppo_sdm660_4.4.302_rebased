@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     name: Only Build OPPO R11 Kernel by ${{ github.actor }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
 
       - name: Get branch names.

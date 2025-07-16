@@ -13,7 +13,6 @@
 #include <linux/tty.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
-#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 
@@ -41,7 +40,6 @@ static volatile int sel_start = -1; 	/* cleared by clear_selection */
 static int sel_end;
 static int sel_buffer_lth;
 static char *sel_buffer;
-static DEFINE_MUTEX(sel_lock);
 
 /* clear_selection, highlight and highlight_pointer can be called
    from interrupt (via scrollback/front) */
@@ -372,13 +370,10 @@ int paste_selection(struct tty_struct *tty)
 	tty_buffer_lock_exclusive(&vc->port);
 
 	add_wait_queue(&vc->paste_wait, &wait);
-	mutex_lock(&sel_lock);
 	while (sel_buffer && sel_buffer_lth > pasted) {
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (test_bit(TTY_THROTTLED, &tty->flags)) {
-			mutex_unlock(&sel_lock);
 			schedule();
-			mutex_lock(&sel_lock);
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);
@@ -387,7 +382,6 @@ int paste_selection(struct tty_struct *tty)
 					      count);
 		pasted += count;
 	}
-	mutex_unlock(&sel_lock);
 	remove_wait_queue(&vc->paste_wait, &wait);
 	__set_current_state(TASK_RUNNING);
 
